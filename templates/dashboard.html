@@ -41,10 +41,22 @@
                     <td class="px-6 py-4 text-xs font-bold text-slate-600">{{ device.hostname }}</td>
                     <td class="px-6 py-4 text-xs text-slate-400 font-medium">Ethernet</td>
                     <td class="px-6 py-4">
+                        {% if device.status == 'Online' %}
                         <span class="text-[10px] font-black text-emerald-500 uppercase tracking-widest flex items-center gap-1.5">
-                            <span class="w-1 h-1 bg-emerald-500 rounded-full"></span>
+                            <span class="w-1 h-1 bg-emerald-500 rounded-full animate-pulse"></span>
                             Online
                         </span>
+                        {% elif device.status == 'Offline' %}
+                        <span class="text-[10px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-1.5">
+                            <span class="w-1 h-1 bg-rose-500 rounded-full"></span>
+                            Offline
+                        </span>
+                        {% else %}
+                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+                            {{ device.status }}
+                        </span>
+                        {% endif %}
                     </td>
                     <td class="px-6 py-4 text-xs text-slate-300 font-mono">00:0C:29:A1:B2:C{{ loop.index }}</td>
                     <td class="px-6 py-4 text-xs font-bold text-slate-500 font-mono">{{ device.ip_address }}</td>
@@ -69,8 +81,8 @@
         <!-- Table Footer -->
         <div class="px-6 py-4 bg-white border-t border-slate-50 flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
             <div class="flex gap-6">
-                <span>Total: {{ devices|length }} interfaces</span>
-                <span>Running: {{ devices|length }}</span>
+                <span>Total: {{ stats.total }} devices</span>
+                <span>Online: {{ stats.online }}</span>
                 <span class="text-emerald-500 flex items-center gap-1.5">
                     <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
                     System Synchronized
@@ -82,23 +94,23 @@
     <!-- Bottom Stats Grid -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12 mb-8">
         <div class="stats-card p-8 rounded-xl group hover:shadow-xl hover:shadow-slate-200/50 transition-all">
-            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">CPU LOAD</h4>
+            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">AVG CPU LOAD</h4>
             <div class="flex items-end gap-2">
-                <span class="text-3xl font-black text-sky-500 leading-none">12.4%</span>
+                <span class="text-3xl font-black text-sky-500 leading-none">{{ stats.cpu }}</span>
                 <div class="flex-1 h-1 bg-slate-50 rounded-full mb-1 overflow-hidden">
-                    <div class="w-1/4 h-full bg-sky-500 rounded-full"></div>
+                    <div class="w-{{ stats.cpu.replace('%', '') }}/100 h-full bg-sky-500 rounded-full"></div>
                 </div>
             </div>
         </div>
         <div class="stats-card p-8 rounded-xl group hover:shadow-xl hover:shadow-slate-200/50 transition-all">
-            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">UPTIME</h4>
-            <span class="text-3xl font-black text-slate-800 leading-none">4d 12h 04m</span>
+            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">SYSTEM UPTIME</h4>
+            <span class="text-3xl font-black text-slate-800 leading-none">{{ stats.uptime }}</span>
         </div>
         <div class="stats-card p-8 rounded-xl group hover:shadow-xl hover:shadow-slate-200/50 transition-all">
-            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">NETWORK THROUGHPUT</h4>
+            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">NETWORK NODES</h4>
             <div class="flex items-center gap-3">
-                <span class="text-3xl font-black text-emerald-500 leading-none">84.2 Mb/s</span>
-                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Downstream</span>
+                <span class="text-3xl font-black text-emerald-500 leading-none">{{ stats.total }}</span>
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Registered</span>
             </div>
         </div>
     </div>

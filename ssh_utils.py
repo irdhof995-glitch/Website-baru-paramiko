@@ -75,15 +75,21 @@ class SSHManager:
                 })
         return interfaces
 
-    def configure_ip(self, interface, ip, mask):
+    def configure_interface(self, interface, action, ip=None, mask=None):
         commands = [
             'configure terminal',
-            f'interface {interface}',
-            f'ip address {ip} {mask}',
-            'no shutdown',
-            'end',
-            'write memory'
+            f'interface {interface}'
         ]
+        
+        if action == 'Add IP' and ip and mask:
+            commands.append(f'ip address {ip} {mask}')
+            commands.append('no shutdown')
+        elif action == 'Remove IP':
+            commands.append('no ip address')
+        elif action == 'No Shutdown':
+            commands.append('no shutdown')
+        
+        commands.extend(['end', 'write memory'])
         
         try:
             shell = self.client.invoke_shell()
@@ -97,6 +103,30 @@ class SSHManager:
         except Exception as e:
             return False, str(e)
 
+    def get_stats(self):
+        """Fetch CPU and Uptime stats from router."""
+        stats = {
+            'cpu': '0%',
+            'uptime': 'N/A',
+            'throughput': '0 Mb/s'
+        }
+        
+        # CPU
+        output, err = self.execute_command('show processes cpu | include five seconds')
+        if not err and output:
+            match = re.search(r'five seconds:\s+(\d+)%', output)
+            if match:
+                stats['cpu'] = match.group(1) + '%'
+        
+        # Uptime
+        output, err = self.execute_command('show version | include uptime')
+        if not err and output:
+            match = re.search(r'uptime is\s+(.*)', output)
+            if match:
+                stats['uptime'] = match.group(1)
+                
+        return stats
+
     def close(self):
         if self.client:
             self.client.close()
@@ -107,20 +137,28 @@ def run_batch_config(device_info, config_lines):
     if not success:
         return False, msg
     
+    results = []
     try:
         shell = manager.client.invoke_shell()
+        shell.send('terminal length 0\n') # Prevent pagination
         shell.send('configure terminal\n')
-        time.sleep(0.5)
+        time.sleep(1)
+        
         for line in config_lines:
             if line.strip():
                 shell.send(line.strip() + '\n')
-                time.sleep(0.2)
+                time.sleep(0.5)
+                # Read output to ensure command was accepted
+                if shell.recv_ready():
+                    out = shell.recv(65535).decode('utf-8', errors='ignore')
+                    results.append(f"CMD: {line.strip()} -> {out.strip()}")
+        
         shell.send('end\n')
         shell.send('write memory\n')
         time.sleep(1)
-        output = shell.recv(65535).decode('utf-8')
+        final_output = "\n".join(results)
         manager.close()
-        return True, output
+        return True, final_output
     except Exception as e:
         manager.close()
         return False, str(e)

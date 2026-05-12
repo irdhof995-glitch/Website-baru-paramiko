@@ -4,10 +4,11 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
-from models import db, User, Device
+from models import db, User, Device, Log
 from ssh_utils import SSHManager, run_batch_config
 import pandas as pd
 import io
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
@@ -25,13 +26,25 @@ login_manager.init_app(app)
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+def log_action(action, level='INFO', device_id=None):
+    user_id = current_user.id if current_user.is_authenticated else None
+    new_log = Log(action=action, level=level, device_id=device_id, user_id=user_id)
+    db.session.add(new_log)
+    db.session.commit()
+
 # --- Routes ---
 
 @app.route('/')
 @login_required
 def dashboard():
     devices = Device.query.all()
-    return render_template('dashboard.html', devices=devices)
+    stats = {
+        'total': len(devices),
+        'online': Device.query.filter_by(status='Online').count(),
+        'cpu': '12.4%', # Example
+        'uptime': '4d 12h'
+    }
+    return render_template('dashboard.html', devices=devices, stats=stats)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -62,6 +75,7 @@ def add_device():
     new_device = Device(hostname=hostname, ip_address=ip, username=username, password=password)
     db.session.add(new_device)
     db.session.commit()
+    log_action(f"Added device {hostname} ({ip})")
     flash('Device registered successfully')
     return redirect(url_for('dashboard'))
 
@@ -69,15 +83,18 @@ def add_device():
 @login_required
 def delete_device(device_id):
     device = Device.query.get_or_404(device_id)
+    hostname = device.hostname
     db.session.delete(device)
     db.session.commit()
-    flash(f'Device {device.hostname} removed')
+    log_action(f"Deleted device {hostname}")
+    flash(f'Device {hostname} removed')
     return redirect(url_for('dashboard'))
 
 @app.route('/device/update/<int:device_id>', methods=['POST'])
 @login_required
 def update_device(device_id):
     device = Device.query.get_or_404(device_id)
+    old_hostname = device.hostname
     device.hostname = request.form.get('hostname')
     device.ip_address = request.form.get('ip')
     device.username = request.form.get('username')
@@ -85,6 +102,7 @@ def update_device(device_id):
     if new_password:
         device.password = new_password
     db.session.commit()
+    log_action(f"Updated device info for {old_hostname} -> {device.hostname}")
     flash(f'Device {device.hostname} updated')
     return redirect(url_for('dashboard'))
 
@@ -116,17 +134,33 @@ def device_detail(device_id):
 def configure_ip(device_id):
     device = Device.query.get_or_404(device_id)
     interface = request.form.get('interface')
-    ip = request.form.get('ip')
-    mask = request.form.get('mask')
+    action = request.form.get('action')
+    ip_raw = request.form.get('ip')
+    
+    # Parse IP and mask (e.g. 10.1.1.1/24)
+    ip = ip_raw
+    mask = "255.255.255.0"
+    if ip_raw and '/' in ip_raw:
+        parts = ip_raw.split('/')
+        ip = parts[0]
+        prefix = int(parts[1])
+        masks = {24: "255.255.255.0", 30: "255.255.255.252", 32: "255.255.255.255", 16: "255.255.0.0", 8: "255.0.0.0"}
+        mask = masks.get(prefix, "255.255.255.0")
     
     ssh = SSHManager(device.ip_address, device.username, device.password)
-    ssh.connect()
-    success, output = ssh.configure_ip(interface, ip, mask)
+    success, msg = ssh.connect()
+    if not success:
+        flash(f"Connection failed: {msg}")
+        return redirect(url_for('device_detail', device_id=device_id))
+        
+    success, output = ssh.configure_interface(interface, action, ip, mask)
     ssh.close()
     
     if success:
-        flash(f'Successfully configured {interface}')
+        log_action(f"Performed {action} on {interface} ({ip or ''}) for {device.hostname}", device_id=device.id)
+        flash(f'Successfully performed {action} on {interface}')
     else:
+        log_action(f"Failed to configure {interface} on {device.hostname}: {output}", level='ERROR', device_id=device.id)
         flash(f'Failed to configure {interface}: {output}')
     
     return redirect(url_for('device_detail', device_id=device_id))
@@ -138,26 +172,22 @@ def batch_config():
         device_ids = request.form.getlist('devices')
         config_text = request.form.get('config_text')
         raw_commands = request.form.get('raw_commands')
-        csv_file = request.files.get('csv_file')
-        
-        results = []
-        commands = []
-        
+        if csv_file:
+            try:
+                df = pd.read_csv(io.StringIO(csv_file.read().decode('utf-8')))
+                # Assuming CSV has 'command' column or just raw lines
+                if 'command' in df.columns:
+                    commands = df['command'].tolist()
+                else:
+                    commands = df.iloc[:, 0].tolist() # Use first column
+            except Exception as e:
+                flash(f"Error reading CSV: {e}")
+                return redirect(url_for('batch_config'))
+
         if raw_commands:
             commands = [c.strip() for c in raw_commands.split('\n') if c.strip()]
-        elif config_text:
-            # Simple parser for "R1, Gi0/1, add, 10.1.1.1/24"
-            lines = [l.strip() for l in config_text.split('\n') if l.strip()]
-            for line in lines:
-                parts = [p.strip() for p in line.split(',')]
-                if len(parts) >= 4:
-                    # Target specific device if hostname matches, or just add to general list
-                    commands.append(f"interface {parts[1]}")
-                    commands.append(f"ip address {parts[3].replace('/', ' ')}")
-                    commands.append("no shutdown")
         
-        # If no specific devices selected but mentioned in config_text, we'd need more complex logic.
-        # For now, apply commands to all selected checkboxes.
+        # If no specific devices selected, use all
         if not device_ids:
             devices = Device.query.all()
             device_ids = [str(d.id) for d in devices]
@@ -171,6 +201,8 @@ def batch_config():
                     'password': device.password
                 }, commands)
                 results.append({'hostname': device.hostname, 'success': success, 'output': output})
+                log_action(f"Batch config on {device.hostname}: {'Success' if success else 'Failed'}", 
+                           level='INFO' if success else 'ERROR', device_id=device.id)
             
         return render_template('batch_results.html', results=results)
     
@@ -197,6 +229,7 @@ def add_user():
         new_user = User(username=username, password=generate_password_hash(password))
         db.session.add(new_user)
         db.session.commit()
+        log_action(f"Created new system user: {username}")
         flash('User created successfully')
     return redirect(url_for('users'))
 
@@ -207,8 +240,10 @@ def delete_user(user_id):
     if user.username == 'admin':
         flash('Cannot delete default admin')
     else:
+        username = user.username
         db.session.delete(user)
         db.session.commit()
+        log_action(f"Deleted system user: {username}")
         flash('User removed')
     return redirect(url_for('users'))
 
@@ -221,7 +256,23 @@ def all_interfaces():
 @app.route('/logs')
 @login_required
 def system_logs():
-    return render_template('logs.html')
+    logs = Log.query.order_by(Log.timestamp.desc()).limit(100).all()
+    return render_template('logs.html', logs=logs)
+
+@app.route('/api/stats')
+@login_required
+def get_global_stats():
+    devices = Device.query.all()
+    total = len(devices)
+    online = Device.query.filter_by(status='Online').count()
+    
+    # In a real app, you might aggregate CPU/Uptime here
+    return jsonify({
+        'total_devices': total,
+        'online_devices': online,
+        'avg_cpu': "12.4%", # Placeholder or aggregate
+        'uptime': "4d 12h"
+    })
 
 @app.route('/terminal')
 @login_required

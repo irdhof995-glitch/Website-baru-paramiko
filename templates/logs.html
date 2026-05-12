@@ -31,38 +31,32 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-50">
+                    {% for log in logs %}
                     <tr class="hover:bg-slate-50/50 transition-all">
-                        <td class="px-8 py-4 text-[11px] font-bold text-slate-400 font-mono">2024-05-12 14:10:22</td>
+                        <td class="px-8 py-4 text-[11px] font-bold text-slate-400 font-mono">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                         <td class="px-8 py-4">
-                            <span class="px-2 py-1 bg-emerald-50 text-emerald-600 text-[9px] font-black uppercase rounded tracking-widest">INFO</span>
-                        </td>
-                        <td class="px-8 py-4 text-xs font-black text-slate-700">SSH_MANAGER</td>
-                        <td class="px-8 py-4 text-xs text-slate-500">Successful login for user 'admin' on 192.168.1.1</td>
-                    </tr>
-                    <tr class="hover:bg-slate-50/50 transition-all">
-                        <td class="px-8 py-4 text-[11px] font-bold text-slate-400 font-mono">2024-05-12 14:08:45</td>
-                        <td class="px-8 py-4">
-                            <span class="px-2 py-1 bg-amber-50 text-amber-600 text-[9px] font-black uppercase rounded tracking-widest">WARNING</span>
-                        </td>
-                        <td class="px-8 py-4 text-xs font-black text-slate-700">DEVICE_POLLER</td>
-                        <td class="px-8 py-4 text-xs text-slate-500">High latency detected on Node: Router (45ms)</td>
-                    </tr>
-                    <tr class="hover:bg-slate-50/50 transition-all">
-                        <td class="px-8 py-4 text-[11px] font-bold text-slate-400 font-mono">2024-05-12 14:05:12</td>
-                        <td class="px-8 py-4">
+                            {% if log.level == 'ERROR' %}
                             <span class="px-2 py-1 bg-rose-50 text-rose-600 text-[9px] font-black uppercase rounded tracking-widest">ERROR</span>
-                        </td>
-                        <td class="px-8 py-4 text-xs font-black text-slate-700">SYSTEM_CORE</td>
-                        <td class="px-8 py-4 text-xs text-slate-500">Failed to establish SSH session to 10.0.0.5: Connection Timeout</td>
-                    </tr>
-                    <tr class="hover:bg-slate-50/50 transition-all">
-                        <td class="px-8 py-4 text-[11px] font-bold text-slate-400 font-mono">2024-05-12 13:55:00</td>
-                        <td class="px-8 py-4">
+                            {% elif log.level == 'WARNING' %}
+                            <span class="px-2 py-1 bg-amber-50 text-amber-600 text-[9px] font-black uppercase rounded tracking-widest">WARNING</span>
+                            {% else %}
                             <span class="px-2 py-1 bg-emerald-50 text-emerald-600 text-[9px] font-black uppercase rounded tracking-widest">INFO</span>
+                            {% endif %}
                         </td>
-                        <td class="px-8 py-4 text-xs font-black text-slate-700">BULK_ENGINE</td>
-                        <td class="px-8 py-4 text-xs text-slate-500">Batch configuration job ID #882 completed successfully</td>
+                        <td class="px-8 py-4 text-xs font-black text-slate-700">
+                            {% if log.device_id %}
+                                DEVICE_{{ log.device_id }}
+                            {% else %}
+                                SYSTEM
+                            {% endif %}
+                        </td>
+                        <td class="px-8 py-4 text-xs text-slate-500">{{ log.action }}</td>
                     </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="px-8 py-10 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">No logs found</td>
+                    </tr>
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
